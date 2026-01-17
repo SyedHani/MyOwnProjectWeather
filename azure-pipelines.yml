@@ -1,38 +1,52 @@
-# ASP.NET Core
-# Build and test ASP.NET Core projects targeting .NET Core.
-# Add steps that run tests, create a NuGet package, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
-
 trigger:
-- master
+  branches:
+    include:
+      - master
 
-pool:
-  vmImage: ubuntu-latest
 
-variables:
-  buildConfiguration: 'Release'
+stages:
+  - stage: Build
+    jobs:
+      - job: Build
+        displayName: "Build Job"
+        pool:
+          vmImage: windows-latest
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              packageType: 'sdk'
+              version: '8.x'
+              installationPath: $(Agent.ToolsDirectory)/dotnet
+              
+          - script: |
+                dotnet build --configuration Release
+            displayName: 'Build Solution'
 
-steps:
-- task: DotNetCoreCLI@2
-  inputs:
-    command: 'build'
-    projects: '**/*.csproj'
-    arguments: '--configuration $(buildConfiguration)'
+          - script: |
+                dotnet publish -c Release -o $(Build.ArtifactStagingDirectory)
+            displayName: "Publish Artifacts"
 
-- task: DotNetCoreCLI@2
-  displayName: 'Restore NuGet Packages'
-  inputs:
-    command: 'restore'
-    projects: '**/*.csproj'
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: $(Build.ArtifactStagingDirectory)
+              ArtifactName: drop
+              publishLocation: 'Container'
 
-- task: DotNetCoreCLI@2
-  displayName: 'Publish Artifact'
-  inputs:
-    command: 'publish'
-    publishWebProjects: false
-    projects: '**/*.csproj'
-    arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
-    zipAfterPublish: true
+  - stage: Deploy
+    jobs:
+      - deployment: DeployWebApp
+        displayName: "Deploy to azure app service"
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: drop
 
-- script: dotnet build --configuration $(buildConfiguration)
-  displayName: 'dotnet build $(buildConfiguration)'
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: 'cicdweather'
+                    appType: 'webApp'
+                    appName: 'haniweather'
+                    package: $(Pipeline.Workspace)/drop
